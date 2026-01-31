@@ -413,4 +413,10 @@ RESW_PIN = A0                       // Encoder switch
 
 ## Credits & License
 Enhanced nixie clock firmware with comprehensive features for reliability and customization.
-Compatible with exixe nixie tube driver modules and DS3231 RTC.
+
+### Hardware Dependencies
+- **exixe Nixie Driver Modules** by dekuNukem: https://github.com/dekuNukem/exixe
+  - Miniature SPI-controlled driver boards for IN-12/IN-14 Nixie tubes
+  - Provides the `exixe.h` Arduino library used in this firmware
+  - 128-level brightness control, RGB LED support, optional tube overdrive
+- **DS3231 RTC Module** - Real-time clock with I2C interface and battery backup
