@@ -5,9 +5,9 @@ This enhanced version includes all improvements from the previous version plus:
 - Date validation with leap year support
 - EEPROM persistence for brightness and LED colors
 - Anti-cathode poisoning protection
-- Watchdog timer for reliability
 - Cleaner encoder state machine
 - RTC power loss detection
+- Auto-set time from compile timestamp on first boot / dead battery
 - Power-on animation
 - Set mode timeout
 - LED color customization
@@ -29,9 +29,9 @@ This enhanced version includes all improvements from the previous version plus:
 ### 2. EEPROM Persistence ✓
 **Addresses:**
 - `0`: Brightness (0-127)
-- `1`: LED Red (0-255)
-- `2`: LED Green (0-255)
-- `3`: LED Blue (0-255)
+- `1`: LED Red (0-127)
+- `2`: LED Green (0-127)
+- `3`: LED Blue (0-127)
 - `4`: Magic byte (0xA5) - indicates EEPROM is initialized
 
 **Behavior:**
@@ -60,14 +60,9 @@ const int ANTI_POISON_CYCLE_DURATION = 100; // ms per digit
 
 **Function:** `runAntiPoisonCycle()`
 
-### 4. Watchdog Timer ✓
-**Purpose:** Auto-reset if code hangs
-**Timeout:** 8 seconds
-**Implementation:**
-- Enabled in `setup()`
-- Reset every loop iteration via `wdt_reset()`
-- Also reset during anti-poison cycle
-- Prevents permanent hangs
+### 4. Watchdog Timer ✗ (disabled)
+**Status:** Disabled in current firmware — caused startup issues during development.
+**Note:** `<avr/wdt.h>` is no longer included. To re-enable, uncomment in `setup()` after testing.
 
 ### 5. Improved Encoder Logic ✓
 **Old method:** Manual state checking with duplicate conditions
@@ -89,21 +84,22 @@ const int8_t ENCODER_TABLE[] = {
 };
 ```
 
-### 6. RTC Lost Power Detection ✓
-**Detection:** `rtc.lostPower()` in setup()
-**Actions if power lost:**
-1. Sets default time: Jan 1, 2024, 00:00:00
-2. Flashes orange warning pattern
-3. Allows normal operation
+### 6. RTC Lost Power Detection / Auto Time-Set ✓
+**Detection:** `rtc.lostPower()` and year-sanity check in setup()
 
-**Warning Pattern:**
-- Orange LEDs (255, 127, 0)
-- 3 flashes
-- All tubes show "0"
-- 500ms on/off
+**Auto time-set triggers if:**
+- RTC battery was dead (`rtc.lostPower()` returns true), OR
+- RTC year is < 2020 (obviously wrong)
 
-**Error Pattern (RTC failure):**
-- Red LEDs (255, 0, 0)
+**Behavior when triggered:**
+1. Sets RTC to compile timestamp (`__DATE__` / `__TIME__`) plus a 10-second upload offset
+2. Flashes confirmation pattern after tube init:
+   - **Orange** (3 flashes, 500ms on/off, tubes show "0") if battery was dead
+   - **Green** (single quick flash, tubes show "8") if RTC just had bad time
+3. No flash if RTC already had a valid time
+
+**Error Pattern (RTC failure on I2C):**
+- Red LEDs (127, 0, 0)
 - 10 flashes
 - All tubes show "8" (all segments)
 - 300ms on/off
@@ -136,9 +132,9 @@ const unsigned long SET_MODE_TIMEOUT = 300000; // 5 minutes
 
 ### 9. LED Color Customization ✓
 **New Modes:**
-- `SET_LED_RED` - Adjust red component (0-255)
-- `SET_LED_GREEN` - Adjust green component (0-255)
-- `SET_LED_BLUE` - Adjust blue component (0-255)
+- `SET_LED_RED` - Adjust red component (0-127)
+- `SET_LED_GREEN` - Adjust green component (0-127)
+- `SET_LED_BLUE` - Adjust blue component (0-127)
 
 **Navigation:**
 From NORMAL mode:
@@ -152,7 +148,7 @@ OR long press from any LED mode to save and exit
 
 **Display Format:**
 - First 3 digits: blank
-- Last 3 digits: value (000-255)
+- Last 3 digits: value (000-127)
 - Example: "   127" for value 127
 
 **Live Preview:** LEDs update in real-time as you adjust colors
@@ -217,7 +213,7 @@ struct DateTimeSet {
 ### Setting Brightness
 1. Long press from NORMAL
 2. Rotate encoder (range: 0-127)
-3. Display shows "    XX"
+3. Display shows "   XXX"
 4. Short press to LED color mode or long press to save and exit
 
 ### Setting LED Colors
@@ -225,7 +221,7 @@ struct DateTimeSet {
    - SET_LED_RED (displays "   XXX")
    - SET_LED_GREEN (displays "   XXX")
    - SET_LED_BLUE (displays "   XXX")
-2. Rotate encoder to adjust each (0-255)
+2. Rotate encoder to adjust each (0-127)
 3. LEDs update in real-time
 4. Short press after blue exits and saves
 5. OR long press anytime to save and exit
@@ -233,16 +229,16 @@ struct DateTimeSet {
 ### Auto-Features
 - **5-minute timeout:** If no button pressed in set mode, auto-saves and exits
 - **Anti-poison:** Runs every 6 hours in NORMAL mode
-- **Watchdog:** Auto-resets if system hangs (8 second timeout)
+- **Watchdog:** Disabled in current firmware
 
 ## EEPROM Memory Map
 ```
 Address | Content           | Range
 --------|-------------------|--------
 0       | Brightness        | 0-127
-1       | LED Red           | 0-255
-2       | LED Green         | 0-255
-3       | LED Blue          | 0-255
+1       | LED Red           | 0-127
+2       | LED Green         | 0-127
+3       | LED Blue          | 0-127
 4       | Magic Byte (0xA5) | Initialized flag
 ```
 
@@ -254,8 +250,8 @@ DATE_DISPLAY_INTERVAL = 55000      // Time before showing date (55s)
 DATE_SHOW_DURATION = 5000          // How long to show date (5s)
 FRAME_INTERVAL = 33                // Display refresh rate (33ms)
 LED_REFRESH_INTERVAL = 1000        // LED refresh rate (1s)
-ENCODER_POLL_INTERVAL = 2          // Encoder read rate (2ms)
-ENCODER_DEBOUNCE_DELAY = 10        // Encoder debounce (10ms)
+ENCODER_POLL_INTERVAL = 5          // Encoder read rate (5ms)
+ENCODER_DEBOUNCE_DELAY = 20        // Encoder debounce (20ms)
 SHORT_PRESS_THRESHOLD = 200        // Short press max (200ms)
 LONG_PRESS_THRESHOLD = 1000        // Long press min (1s)
 BLINK_INTERVAL = 500               // Blink rate in set mode (500ms)
@@ -311,9 +307,8 @@ RESW_PIN = A0                       // Encoder switch
 
 ### System Resets Randomly
 **Symptom:** Clock restarts unexpectedly
-**Cause:** Watchdog timer triggered
-**Meaning:** Code got stuck somewhere
-**Check:** Look for infinite loops or blocking operations
+**Cause:** Likely a hardware issue (power supply, brown-out) since the watchdog is disabled
+**Check:** Power rail stability, RTC connection integrity, infinite loops or blocking operations
 
 ## Performance Notes
 
@@ -329,8 +324,8 @@ RESW_PIN = A0                       // Encoder switch
 - Smooth visual transitions
 
 ### Encoder Responsiveness
-- 2ms polling = 500 checks per second
-- 10ms debounce prevents bounce
+- 5ms polling = 200 checks per second
+- 20ms debounce prevents bounce
 - State table eliminates errors
 - Very responsive feel
 
@@ -340,14 +335,17 @@ RESW_PIN = A0                       // Encoder switch
 - ✓ Date validation
 - ✓ EEPROM persistence
 - ✓ Anti-cathode poisoning
-- ✓ Watchdog timer
 - ✓ Improved encoder
 - ✓ RTC power loss detection
+- ✓ Auto time-set from compile timestamp
 - ✓ Power-on animation
 - ✓ Set mode timeout
 - ✓ LED color customization
 - ✓ Memory optimization
 - ✓ Smoother crossfade
+
+### Disabled
+- ✗ Watchdog timer (caused startup issues; code path removed)
 
 ### Potential Future Additions
 - Temperature display (DS3231 has sensor)
@@ -362,12 +360,12 @@ RESW_PIN = A0                       // Encoder switch
 ## Migration from Previous Version
 
 ### What's New
-- Add `#include <EEPROM.h>` and `#include <avr/wdt.h>`
+- Add `#include <EEPROM.h>`
 - New EEPROM functions and constants
 - DateTime struct instead of array
 - LED color adjustment modes
 - Anti-poison cycle
-- Watchdog timer
+- Auto time-set from compile time (with green/orange flash confirmation)
 - Enhanced error handling
 
 ### What's Compatible
@@ -407,7 +405,6 @@ RESW_PIN = A0                       // Encoder switch
 - [ ] Brightness persists after power cycle
 - [ ] 5-minute timeout auto-saves and exits
 - [ ] Anti-poison cycle runs (can trigger manually by waiting 6 hours or changing constant)
-- [ ] Watchdog prevents hangs
 - [ ] All tubes display correctly
 - [ ] LED colors uniform across all tubes
 
